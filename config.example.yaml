@@ -1,0 +1,95 @@
+# config.yaml
+
+# ==================== 数据路径配置 ====================
+data:
+  image_dir: data/images
+  image_test_dir: data/images_test
+  output_dir: outputs
+  label_csv: data/labels.csv
+  raw_dir: data/raw
+  split_csv_dir: data/split_csv
+  predictions_csv: outputs/predictions.csv
+  test_predictions_csv: outputs/test_predictions.csv
+
+# ==================== 模型配置 ====================
+model:
+  backbone: resnet50
+  num_classes: 3
+  pretrained: True
+  name: rack_model
+  version: v4
+  save_path: models/rack_model_v4.pth
+
+# ==================== 训练参数 ====================
+train:
+  batch_size: 16
+  epochs: 10
+  learning_rate: 0.0001
+  image_size: 224
+
+# ==================== 类别标签 ====================
+classes:
+  - RC
+  - RP
+  - other
+
+# ==================== 阈值配置 ====================
+threshold: 0.5
+predict_threshold: 0.6
+
+# ==================== 报告配置 ====================
+save_report: True
+report_file: outputs/report_file.txt
+
+# ==================== 环境配置 ====================
+# 当前激活的环境: development, testing, production
+# 密码优先级: RACK_MYSQL_PASSWORD 环境变量 > config.secrets.yaml > 下方占位符
+active_env: development
+
+# 各环境配置（mysql.password 为占位符，真实密码见 config.secrets.yaml 或 RACK_MYSQL_PASSWORD）
+environments:
+  # 开发环境配置
+  development:
+    resource_domain: "https://resource.example.cn"
+    mysql:
+      host: localhost
+      port: 3306
+      user: root
+      password: "${RACK_MYSQL_PASSWORD}"
+      database: example
+      connect_timeout: 30
+      read_timeout: 30
+      write_timeout: 30
+    logging:
+      level: DEBUG
+
+  # 测试环境配置
+  testing:
+    resource_domain: "https://resource-test.example.cn"
+    mysql:
+      host: test-db-server.example.com
+      port: 3306
+      user: test_user
+      password: "${RACK_MYSQL_PASSWORD}"
+      database: example
+      connect_timeout: 30
+      read_timeout: 30
+      write_timeout: 30
+    logging:
+      level: INFO
+
+  # 生产环境配置
+  production:
+    resource_domain: "https://resource.example.cn"
+    mysql:
+      host: production-db-server.example.com
+      port: 3306
+      user: backend
+      password: "${RACK_MYSQL_PASSWORD}"
+      database: example
+      connect_timeout: 30
+      read_timeout: 30
+      write_timeout: 30
+      client_flag: MULTI_STATEMENTS
+    logging:
+      level: WARNING
