@@ -19,20 +19,21 @@ from utils.config_loader import (
 
 _EXPECTED = {
     "development": {
-        "resource_domain": "https://resource.linno.cn",
+        "resource_domain": "https://resource.example.cn",
         "mysql_host": "localhost",
     },
     "testing": {
-        "resource_domain": "https://resource-test.linno.cn",
+        "resource_domain": "https://resource-test.example.cn",
         "mysql_host": "test-db-server.example.com",
     },
     "production": {
-        "resource_domain": "https://resource.linno.cn",
-        "mysql_host": "public-wz9b38c4xu0lv0585.rwlb.rds.aliyuncs.com",
+        "resource_domain": "https://resource.example.cn",
+        "mysql_host": "production-db-server.example.com",
     },
 }
 
 _PASSWORD_ERROR = "未配置 {} 的 MySQL 密码，请设置 RACK_MYSQL_PASSWORD 或 config.secrets.yaml"
+
 
 def _reset_env(*, rack_env: str | None = None) -> None:
     config_loader.load_config.cache_clear()

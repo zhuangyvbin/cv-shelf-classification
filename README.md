@@ -1,4 +1,4 @@
-# rack_multilabel
+# cv-shelf-classification
 
 货架多标签图像分类项目。训练、评估与预测脚本位于 `scripts/`，统一配置由 `utils/config_loader.py` 加载。
 
@@ -45,11 +45,11 @@
 
 ### 各环境差异（摘要）
 
-| 环境 | resource_domain | 典型用途 |
-|------|-----------------|----------|
-| development | `https://resource.linno.cn` | 本地开发 |
-| testing | `https://resource-test.linno.cn` | 测试联调 |
-| production | `https://resource.linno.cn` | 生产 |
+| 环境 | resource_domain                  | 典型用途 |
+|------|----------------------------------|----------|
+| development | `https://resource.example.cn`    | 本地开发 |
+| testing | `https://resource-test.example.cn` | 测试联调 |
+| production | `https://resource.example.cn`      | 生产 |
 
 完整 MySQL 主机、库名等见 [`config.yaml`](config.yaml) 的 `environments` 节。
 
