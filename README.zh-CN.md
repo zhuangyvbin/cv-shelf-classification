@@ -98,12 +98,12 @@ flowchart LR
 ### 环境与安装
 
 ```bash
-cd /path/to/rack_multilabel   # 替换为你的克隆路径
+cd /path/to/cv-shelf-classification   # 替换为你的克隆路径
 pip install -r requirements.txt
 cp config.secrets.example.yaml config.secrets.yaml   # 本地 MySQL 时需要
 ```
 
-> **注意**：`requirements.txt` 末尾含可编辑安装行 `-e g:\www\python_www\rack_clean_multilabel`，请按本机路径修改或删除该行后再安装。
+> **注意**：`requirements.txt` 末尾含可编辑安装行 `-e g:\www\python_www\cv-shelf-classification`，请按本机路径修改或删除该行后再安装。
 
 ### 数据准备 → 训练 → 评估
 
@@ -157,7 +157,7 @@ python evaluate.py
 ## 项目结构
 
 ```
-rack_multilabel/
+cv-shelf-classification/
 ├── config.yaml              # 数据/模型/训练/阈值/环境
 ├── config.secrets.yaml      # 本地密码（gitignore，见 config.secrets.example.yaml）
 ├── data/

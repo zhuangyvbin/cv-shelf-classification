@@ -98,12 +98,12 @@ At inference, apply `sigmoid` to logits, then compare against `predict_threshold
 ### Environment and install
 
 ```bash
-cd /path/to/rack_multilabel   # replace with your clone path
+cd /path/to/cv-shelf-classification   # replace with your clone path
 pip install -r requirements.txt
 cp config.secrets.example.yaml config.secrets.yaml   # required for local MySQL
 ```
 
-> **Note**: `requirements.txt` ends with an editable install line `-e g:\www\python_www\rack_clean_multilabel`. Adjust the path for your machine or remove that line before installing.
+> **Note**: `requirements.txt` ends with an editable install line `-e g:\www\python_www\cv-shelf-classification`. Adjust the path for your machine or remove that line before installing.
 
 ### Data prep → train → evaluate
 
@@ -157,7 +157,7 @@ For environment variables, MySQL passwords, and local config checks, see [Config
 ## Project structure
 
 ```
-rack_multilabel/
+cv-shelf-classification/
 ├── config.yaml              # data/model/train/threshold/environments
 ├── config.secrets.yaml      # local passwords (gitignored; see config.secrets.example.yaml)
 ├── data/
