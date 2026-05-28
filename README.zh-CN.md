@@ -12,7 +12,7 @@
 
 - **多标签 + 类别不均衡**：[`utils/imageset.py`](utils/imageset.py) 支持 `oversample_minority`、`compute_pos_weight_from_csv`；训练使用 `BCEWithLogitsLoss(pos_weight=...)` 缓解正负样本不平衡。
 - **端到端脚本链**：`img_to_label.py` → `train.py` → `predict.py` → `evaluate.py`，业务参数集中在 [`config.yaml`](config.yaml)。
-- **生产集成**：`predict_from_mysql()` 从业务表拉取待处理记录，经 `build_resource_url()` 拼接图片 URL，批量推理后将 JSON 结果写回数据库（见 [`scripts/predict.py`](scripts/predict.py) 约 109–227 行）。
+- **生产集成**：`predict_from_mysql()`（历史 `create_time` 补数）与 `predict_yesterday_from_mysql()`（按昨日 `upload_time`、跳过已预测行）从业务表拉取记录，经 `build_resource_url()` 拼接图片 URL，批量推理后将 JSON 结果写回数据库（见 [`scripts/predict.py`](scripts/predict.py)）。
 - **多环境配置**：支持 development / testing / production；MySQL 密码不入库，通过 `config.secrets.yaml` 或 `RACK_MYSQL_PASSWORD` 注入。
 - **可复现评估**：`evaluate.py` 输出 classification report，并生成 `outputs/roc_curve.png`。
 
@@ -127,16 +127,33 @@ python evaluate.py
 
 ### 预测模式
 
-与 [`scripts/predict.py`](scripts/predict.py) 中 `__main__` 的四种入口一致：
+与 [`scripts/predict.py`](scripts/predict.py) 中 `__main__` 的五种入口一致：
 
-| 模式 | 说明 | 示例 |
-|------|------|------|
-| 单图/URL | 默认入口 | `python predict.py` |
-| 文件夹 | `predict_folder` | 取消注释：`predict_folder("../data/images_test")` |
-| CSV | `predict_from_csv` | 取消注释：`predict_from_csv("../data/split_csv/test.csv")` |
-| MySQL | `predict_from_mysql` | 需配置 `RACK_MYSQL_PASSWORD`；取消注释：`predict_from_mysql()` |
+| 模式 | 函数 | 说明 | 示例 |
+|------|------|------|------|
+| 单图/URL | `predict_image` | 默认演示 | `python predict.py` |
+| 文件夹 | `predict_folder` | 目录批量 | 取消注释：`predict_folder("../data/images_test")` |
+| CSV | `predict_from_csv` | 从划分 CSV 批量 | 取消注释：`predict_from_csv("../data/split_csv/test.csv")` |
+| MySQL（补数） | `predict_from_mysql` | 固定 `create_time` 窗口；不去重 | 需配置 `RACK_MYSQL_PASSWORD`；取消注释：`predict_from_mysql()` |
+| MySQL（昨日） | `predict_yesterday_from_mysql` | 昨日 `upload_time`（北京时间 `[start, end)`）；已存在于 `user_visit_img_predictions` 的 `img_id` 跳过 | 见 [定时批处理](#定时批处理cron) |
 
 环境变量、MySQL 密码与本地配置校验见下文 [配置](#配置)。
+
+### 定时批处理（cron）
+
+生产环境建议每日调用 `predict_yesterday_from_mysql()`（默认处理**昨天**北京时间全天）。启动日志会打印实际日期与 `start_ts` / `end_ts`，便于与 cron 日志核对。
+
+```bash
+# 示例：每天 02:00 执行（Linux cron）
+0 2 * * * cd /path/to/rack_multilabel/scripts && RACK_ENV=production RACK_MYSQL_PASSWORD='***' python -c "from predict import predict_yesterday_from_mysql; predict_yesterday_from_mysql()"
+```
+
+也可在 [`scripts/predict.py`](scripts/predict.py) 的 `__main__` 中取消注释后执行 `python predict.py`：
+
+```python
+# predict_yesterday_from_mysql()
+# predict_yesterday_from_mysql(target_date=date(2026, 5, 26))  # 补跑指定日
+```
 
 ---
 
@@ -210,7 +227,7 @@ CI 或生产可只设 `RACK_MYSQL_PASSWORD`，无需创建 `config.secrets.yaml`
 | `RACK_ENV` | 否 | `development` \| `testing` \| `production`；未设置 → `config.yaml` 的 `active_env` → `development` |
 | `RACK_MYSQL_PASSWORD` | 是* | MySQL 密码；**覆盖所有环境**，高于 `config.secrets.yaml` 与 `config.yaml` 占位符 |
 
-\* `predict_from_mysql()` 需要密码，除非当前环境在 `config.secrets.yaml` 中已填写真实密码。
+\* `predict_from_mysql()` / `predict_yesterday_from_mysql()` 需要密码，除非当前环境在 `config.secrets.yaml` 中已填写真实密码。
 
 | 配置项 | 优先级（高 → 低） |
 |--------|-------------------|
@@ -256,5 +273,5 @@ python scripts/verify_config_env.py
 
 | 情况 | 说明 / 处理 |
 |------|-------------|
-| 未配置密码（如 `predict_from_mysql()`） | `ValueError: 未配置 <环境名> 的 MySQL 密码，请设置 RACK_MYSQL_PASSWORD 或 config.secrets.yaml` — 设置环境变量或为该环境填写 `config.secrets.yaml` |
+| 未配置密码（如 `predict_from_mysql()`、`predict_yesterday_from_mysql()`） | `ValueError: 未配置 <环境名> 的 MySQL 密码，请设置 RACK_MYSQL_PASSWORD 或 config.secrets.yaml` — 设置环境变量或为该环境填写 `config.secrets.yaml` |
 | 非法 `RACK_ENV` | `ValueError: 无效环境 '…'，允许值: development, production, testing` |

@@ -12,7 +12,7 @@ Typical pipeline: **raw directory labels → dataset split → train → evaluat
 
 - **Multi-label + class imbalance**: [`utils/imageset.py`](utils/imageset.py) supports `oversample_minority` and `compute_pos_weight_from_csv`; training uses `BCEWithLogitsLoss(pos_weight=...)` to mitigate positive/negative imbalance.
 - **End-to-end script chain**: `img_to_label.py` → `train.py` → `predict.py` → `evaluate.py`, with parameters centralized in [`config.yaml`](config.yaml).
-- **Production integration**: `predict_from_mysql()` fetches pending records from business tables, builds image URLs via `build_resource_url()`, runs batch inference, and writes JSON results back (see [`scripts/predict.py`](scripts/predict.py) ~lines 109–227).
+- **Production integration**: `predict_from_mysql()` (historical backfill) and `predict_yesterday_from_mysql()` (yesterday `upload_time`, skips existing predictions) fetch records from business tables, build image URLs via `build_resource_url()`, run batch inference, and write JSON results back (see [`scripts/predict.py`](scripts/predict.py)).
 - **Multi-environment config**: development / testing / production; MySQL passwords are not committed — inject via `config.secrets.yaml` or `RACK_MYSQL_PASSWORD`.
 - **Reproducible evaluation**: `evaluate.py` outputs a classification report and `outputs/roc_curve.png`.
 
@@ -127,16 +127,33 @@ python evaluate.py
 
 ### Prediction modes
 
-Four entry points in [`scripts/predict.py`](scripts/predict.py) `__main__`:
+Five entry points in [`scripts/predict.py`](scripts/predict.py) `__main__`:
 
-| Mode | Description | Example |
-|------|-------------|---------|
-| Single image/URL | Default entry | `python predict.py` |
-| Folder | `predict_folder` | Uncomment: `predict_folder("../data/images_test")` |
-| CSV | `predict_from_csv` | Uncomment: `predict_from_csv("../data/split_csv/test.csv")` |
-| MySQL | `predict_from_mysql` | Set `RACK_MYSQL_PASSWORD`; uncomment: `predict_from_mysql()` |
+| Mode | Function | Description | Example |
+|------|----------|-------------|---------|
+| Single image/URL | `predict_image` | Default demo | `python predict.py` |
+| Folder | `predict_folder` | Batch over a directory | Uncomment: `predict_folder("../data/images_test")` |
+| CSV | `predict_from_csv` | Batch from split CSV | Uncomment: `predict_from_csv("../data/split_csv/test.csv")` |
+| MySQL (backfill) | `predict_from_mysql` | Fixed `create_time` window; no dedup | Set `RACK_MYSQL_PASSWORD`; uncomment: `predict_from_mysql()` |
+| MySQL (yesterday) | `predict_yesterday_from_mysql` | Yesterday `upload_time` (Beijing, `[start, end)`); skips rows already in `user_visit_img_predictions` | See [Scheduled batch](#scheduled-batch-cron) below |
 
 For environment variables, MySQL passwords, and local config checks, see [Configuration](#configuration) below.
+
+### Scheduled batch (cron)
+
+For daily production runs, call `predict_yesterday_from_mysql()` (default: **yesterday** in Asia/Shanghai). Logs include the resolved date and `start_ts` / `end_ts` for audit.
+
+```bash
+# Example: run at 02:00 every day (Linux cron)
+0 2 * * * cd /path/to/rack_multilabel/scripts && RACK_ENV=production RACK_MYSQL_PASSWORD='***' python -c "from predict import predict_yesterday_from_mysql; predict_yesterday_from_mysql()"
+```
+
+Alternatively, uncomment in [`scripts/predict.py`](scripts/predict.py) `__main__` and run `python predict.py`:
+
+```python
+# predict_yesterday_from_mysql()
+# predict_yesterday_from_mysql(target_date=date(2026, 5, 26))  # backfill a specific day
+```
 
 ---
 
@@ -210,7 +227,7 @@ In CI or production you can skip this file and set only `RACK_MYSQL_PASSWORD`.
 | `RACK_ENV` | No | `development` \| `testing` \| `production`. Unset → `active_env` in `config.yaml` → `development`. |
 | `RACK_MYSQL_PASSWORD` | Yes* | MySQL password; **overrides every environment**, above `config.secrets.yaml` and `config.yaml` placeholders. |
 
-\* Required for `predict_from_mysql()` unless the active env has a real password in `config.secrets.yaml`.
+\* Required for `predict_from_mysql()` / `predict_yesterday_from_mysql()` unless the active env has a real password in `config.secrets.yaml`.
 
 | Setting | Priority (high → low) |
 |---------|------------------------|
@@ -256,5 +273,5 @@ Expect `全部验证通过。` on success.
 
 | Situation | Message / fix |
 |-----------|-----------------|
-| Password missing (e.g. `predict_from_mysql()`) | `ValueError: 未配置 <env> 的 MySQL 密码，请设置 RACK_MYSQL_PASSWORD 或 config.secrets.yaml` — set env var or `config.secrets.yaml` for that env |
+| Password missing (e.g. `predict_from_mysql()`, `predict_yesterday_from_mysql()`) | `ValueError: 未配置 <env> 的 MySQL 密码，请设置 RACK_MYSQL_PASSWORD 或 config.secrets.yaml` — set env var or `config.secrets.yaml` for that env |
 | Invalid `RACK_ENV` | `ValueError: 无效环境 '…'，允许值: development, production, testing` |

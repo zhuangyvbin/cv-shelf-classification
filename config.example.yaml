@@ -37,6 +37,16 @@ classes:
 threshold: 0.5
 predict_threshold: 0.6
 
+# ==================== 推理 / MySQL 批处理 ====================
+predict:
+  threshold: 0.6
+  mysql_batch_size: 500
+  max_attempts: 3
+  retry_backoff_seconds: [0.5, 1.0]
+  failure_log: predict_mysql_failures.log
+  beijing_tz_offset_hours: 8
+  backfill_create_time_range: [1772294400, 1774972800]
+
 # ==================== 报告配置 ====================
 save_report: True
 report_file: outputs/report_file.txt
