@@ -5,3 +5,4 @@ config.secrets.yaml
 .env
 .cursor/
 config.yaml
+scripts/verify_config_env.py
