@@ -110,14 +110,14 @@ __all__ = [
 
 if __name__ == "__main__":
     # 1. 单张图像预测示例
-    print(
-        predict_image(
-            build_resource_url(
-                "resource/image/visit/fromrpphoto/2025/07/02/"
-                "visitPhoto_10631389.jpg"
-            )
-        )
-    )
+    # print(
+    #     predict_image(
+    #         build_resource_url(
+    #             "resource/image/visit/fromrpphoto/2025/07/02/"
+    #             "visitPhoto_10631389.jpg"
+    #         )
+    #     )
+    # )
 
     # 2. 文件夹批量预测
     # predict_folder("../data/images_test")
@@ -129,5 +129,5 @@ if __name__ == "__main__":
     # predict_from_mysql()
 
     # 5. 昨日 upload_time 批处理（适合 cron）
-    # predict_yesterday_from_mysql()
-    # predict_yesterday_from_mysql(target_date=date(2026, 5, 26))  # 补跑指定日
+    predict_yesterday_from_mysql()
+    # predict_yesterday_from_mysql(target_date=date(2026, 4, 1))  # 补跑指定日
