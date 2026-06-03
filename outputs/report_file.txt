@@ -1,0 +1,10 @@
+              precision    recall  f1-score   support
+
+          RC       0.99      0.96      0.97       277
+          RP       0.99      0.91      0.95       293
+       other       0.96      0.99      0.98       306
+
+   micro avg       0.98      0.96      0.97       876
+   macro avg       0.98      0.95      0.97       876
+weighted avg       0.98      0.96      0.97       876
+ samples avg       0.98      0.97      0.97       876
