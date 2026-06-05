@@ -93,7 +93,30 @@ def _get_predict_failure_file_logger(cfg: dict | None = None) -> logging.Logger:
     return failure_logger
 
 
+def _iter_paginated_rows(
+    cursor,
+    base_sql: str,
+    base_params: tuple | None,
+    page_size: int,
+    id_col: str,
+):
+    """按 id 游标分页拉取行，每页 yield (last_id, rows)。"""
+    last_id = 0
+    params = base_params or ()
+    while True:
+        page_sql = (
+            f"{base_sql.strip()} AND {id_col} > %s ORDER BY {id_col} LIMIT %s"
+        )
+        cursor.execute(page_sql, params + (last_id, page_size))
+        rows = cursor.fetchall()
+        if not rows:
+            break
+        yield last_id, rows
+        last_id = rows[-1][0]
+
+
 def _flush_prediction_records(conn, records, logger, insert_count):
+    conn.ping(reconnect=True)
     with conn.cursor() as insert_cursor:
         insert_cursor.executemany(_INSERT_PREDICTIONS_SQL, records)
         conn.commit()
@@ -167,26 +190,45 @@ def run_mysql_batch(
     params: tuple | None = None,
     log_context: str = "",
     batch_size: int | None = None,
+    id_col: str = "id",
     cfg: dict | None = None,
 ) -> int:
     if cfg is None:
         cfg = load_config()
     if batch_size is None:
         batch_size = get_predict_cfg(cfg)["mysql_batch_size"]
+    page_size = get_predict_cfg(cfg)["mysql_fetch_page_size"]
     logger = setup_predict_logging()
     if log_context:
         logger.info(log_context)
 
     conn = pymysql.connect(**get_mysql_connect_kwargs())
     try:
-        with conn.cursor() as cursor:
-            cursor.execute(select_sql, params)
-            rows = cursor.fetchall()
-        insert_count = process_mysql_rows(
-            conn, rows, logger, batch_size=batch_size, cfg=cfg
-        )
+        total_insert_count = 0
+        if page_size > 0:
+            with conn.cursor() as cursor:
+                for last_id, rows in _iter_paginated_rows(
+                    cursor, select_sql, params, page_size, id_col
+                ):
+                    logger.info(
+                        "分页查询: last_id=%d, page_size=%d, fetched=%d",
+                        last_id,
+                        page_size,
+                        len(rows),
+                    )
+                    total_insert_count += process_mysql_rows(
+                        conn, rows, logger, batch_size=batch_size, cfg=cfg
+                    )
+        else:
+            fetch_sql = f"{select_sql.strip()} ORDER BY {id_col}"
+            with conn.cursor() as cursor:
+                cursor.execute(fetch_sql, params)
+                rows = cursor.fetchall()
+            total_insert_count = process_mysql_rows(
+                conn, rows, logger, batch_size=batch_size, cfg=cfg
+            )
         logger.info("数据库预测结果已全部更新完成")
-        return insert_count
+        return total_insert_count
     except Exception:
         logger.exception("MySQL 批量预测失败")
         raise
@@ -213,7 +255,6 @@ def predict_from_mysql(cfg: dict | None = None) -> int:
             AND picture_path IS NOT NULL
             AND create_time >= %s
             AND create_time < %s
-            ORDER BY id
         """,
         params=(start_ts, end_ts),
         log_context=f"create_time 补数窗口: [{start_ts}, {end_ts})",
@@ -239,18 +280,20 @@ def predict_yesterday_from_mysql(
         select_sql=f"""
             SELECT u.id, u.visit_id, u.picture_path, u.img_place
             FROM user_visit_imgs u
-            LEFT JOIN user_visit_img_predictions p ON p.img_id = u.id
             WHERE u.img_place IN ({places})
               AND u.picture_path IS NOT NULL
               AND u.upload_time >= %s
               AND u.upload_time < %s
-              AND p.img_id IS NULL
-            ORDER BY u.id
+              AND NOT EXISTS (
+                  SELECT 1 FROM user_visit_img_predictions p
+                  WHERE p.img_id = u.id
+              )
         """,
         params=(start_ts, end_ts),
         log_context=(
             f"upload_time 区间: date={actual_date}, start_ts={start_ts}, end_ts={end_ts}"
         ),
+        id_col="u.id",
         cfg=cfg,
     )
     logger = logging.getLogger(__name__)

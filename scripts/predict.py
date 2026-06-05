@@ -129,11 +129,22 @@ if __name__ == "__main__":
     # predict_from_mysql()
 
     # 5. 昨日 upload_time 批处理（适合 cron）
-    start_time = datetime.now()
-    print(f"前一天 rack_predict 批处理脚本开始... (开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')})")
-    insert_count = predict_yesterday_from_mysql()
-    end_time = datetime.now()
-    duration = end_time - start_time
-    print(f"前一天 rack_predict 批处理脚本结束... (结束时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}, 耗时: {duration.total_seconds():.2f}秒, 插入记录数: {insert_count})")
+    try:
+        start_time = datetime.now()
+        print(
+            f"前一天 rack_predict 批处理脚本开始... "
+            f"(开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')})"
+        )
+        insert_count = predict_yesterday_from_mysql()
+        end_time = datetime.now()
+        duration = end_time - start_time
+        print(
+            f"前一天 rack_predict 批处理脚本结束... "
+            f"(结束时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}, "
+            f"耗时: {duration.total_seconds():.2f}秒, 插入记录数: {insert_count})"
+        )
+    except Exception as exc:
+        print(f"前一天 rack_predict 批处理失败: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     # predict_yesterday_from_mysql(target_date=date(2026, 4, 1))  # 补跑指定日

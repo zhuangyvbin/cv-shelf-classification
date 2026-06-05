@@ -41,6 +41,7 @@ predict_threshold: 0.6
 predict:
   threshold: 0.6
   mysql_batch_size: 500
+  mysql_fetch_page_size: 1000   # 每次 SELECT 最多拉取行数，0 或不填则保持 fetchall 行为
   max_attempts: 3
   retry_backoff_seconds: [0.5, 1.0]
   failure_log: predict_mysql_failures.log

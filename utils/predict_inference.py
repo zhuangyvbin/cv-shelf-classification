@@ -27,6 +27,7 @@ def get_predict_cfg(cfg: dict | None = None) -> dict:
     return {
         "threshold": p.get("threshold", cfg.get("predict_threshold", 0.6)),
         "mysql_batch_size": p.get("mysql_batch_size", 500),
+        "mysql_fetch_page_size": p.get("mysql_fetch_page_size", 1000),
         "max_attempts": p.get("max_attempts", 3),
         "retry_backoff_seconds": tuple(backoff),
         "failure_log": p.get("failure_log", "predict_mysql_failures.log"),
