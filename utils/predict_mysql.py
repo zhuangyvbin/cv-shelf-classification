@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
+from typing import TypeVar
 
 import pymysql
 
@@ -27,6 +29,70 @@ _INSERT_PREDICTIONS_SQL = """
         predict_status, failure_reason, model_version, predict_time
     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 """
+
+_T = TypeVar("_T")
+
+_MYSQL_RETRYABLE_ERRNOS = frozenset({2003, 2006, 2013, 2055})
+
+
+def _is_mysql_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, pymysql.err.OperationalError):
+        return exc.args[0] in _MYSQL_RETRYABLE_ERRNOS
+    if isinstance(exc, pymysql.err.InterfaceError):
+        return True
+    return False
+
+
+class _ConnHolder:
+    """持有 pymysql 连接，支持重连与关闭。"""
+
+    def __init__(self) -> None:
+        self.conn = pymysql.connect(**get_mysql_connect_kwargs())
+
+    def reconnect(self) -> None:
+        self.close()
+        self.conn = pymysql.connect(**get_mysql_connect_kwargs())
+
+    def close(self) -> None:
+        if self.conn is not None:
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            self.conn = None
+
+
+def _with_mysql_retry(
+    operation: Callable[[], _T],
+    *,
+    holder: _ConnHolder,
+    cfg: dict | None,
+    logger: logging.Logger,
+    op_name: str,
+) -> _T:
+    predict_cfg = get_predict_cfg(cfg)
+    max_attempts = predict_cfg["max_attempts"]
+    backoff_seconds = predict_cfg["retry_backoff_seconds"]
+
+    for attempt in range(max_attempts):
+        try:
+            return operation()
+        except BaseException as exc:
+            if not _is_mysql_retryable(exc):
+                raise
+            if attempt >= max_attempts - 1:
+                raise
+            logger.warning(
+                "MySQL %s 重试 (attempt %d/%d): %s",
+                op_name,
+                attempt + 1,
+                max_attempts,
+                exc,
+            )
+            holder.reconnect()
+            backoff = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
+            time.sleep(backoff)
+    raise RuntimeError("unreachable")
 
 
 def _project_path(*parts: str) -> str:
@@ -94,39 +160,70 @@ def _get_predict_failure_file_logger(cfg: dict | None = None) -> logging.Logger:
 
 
 def _iter_paginated_rows(
-    cursor,
+    holder: _ConnHolder,
     base_sql: str,
     base_params: tuple | None,
     page_size: int,
     id_col: str,
+    cfg: dict | None,
+    logger: logging.Logger,
 ):
     """按 id 游标分页拉取行，每页 yield (last_id, rows)。"""
     last_id = 0
     params = base_params or ()
+    page_sql = (
+        f"{base_sql.strip()} AND {id_col} > %s ORDER BY {id_col} LIMIT %s"
+    )
     while True:
-        page_sql = (
-            f"{base_sql.strip()} AND {id_col} > %s ORDER BY {id_col} LIMIT %s"
+        current_last_id = last_id
+
+        def fetch_page() -> list:
+            with holder.conn.cursor() as cursor:
+                cursor.execute(page_sql, params + (current_last_id, page_size))
+                return cursor.fetchall()
+
+        rows = _with_mysql_retry(
+            fetch_page,
+            holder=holder,
+            cfg=cfg,
+            logger=logger,
+            op_name=f"分页查询 last_id={current_last_id}",
         )
-        cursor.execute(page_sql, params + (last_id, page_size))
-        rows = cursor.fetchall()
         if not rows:
             break
         yield last_id, rows
         last_id = rows[-1][0]
 
 
-def _flush_prediction_records(conn, records, logger, insert_count):
-    conn.ping(reconnect=True)
-    with conn.cursor() as insert_cursor:
-        insert_cursor.executemany(_INSERT_PREDICTIONS_SQL, records)
-        conn.commit()
-        insert_count += len(records)
-        logger.info(f"已插入 {insert_count} 条记录")
+def _flush_prediction_records(
+    holder: _ConnHolder,
+    records: list,
+    logger: logging.Logger,
+    insert_count: int,
+    cfg: dict | None,
+) -> int:
+    batch_len = len(records)
+
+    def do_insert() -> None:
+        holder.conn.ping(reconnect=True)
+        with holder.conn.cursor() as insert_cursor:
+            insert_cursor.executemany(_INSERT_PREDICTIONS_SQL, records)
+            holder.conn.commit()
+
+    _with_mysql_retry(
+        do_insert,
+        holder=holder,
+        cfg=cfg,
+        logger=logger,
+        op_name="批量插入",
+    )
+    insert_count += batch_len
+    logger.info(f"已插入 {insert_count} 条记录")
     return insert_count
 
 
 def process_mysql_rows(
-    conn,
+    holder: _ConnHolder,
     rows,
     logger: logging.Logger,
     batch_size: int | None = None,
@@ -166,13 +263,13 @@ def process_mysql_rows(
 
         if len(records) >= batch_size:
             insert_count = _flush_prediction_records(
-                conn, records, logger, insert_count
+                holder, records, logger, insert_count, cfg
             )
             records = []
 
     if records:
         insert_count = _flush_prediction_records(
-            conn, records, logger, insert_count
+            holder, records, logger, insert_count, cfg
         )
 
     logger.info(
@@ -202,30 +299,45 @@ def run_mysql_batch(
     if log_context:
         logger.info(log_context)
 
-    conn = pymysql.connect(**get_mysql_connect_kwargs())
+    holder = _ConnHolder()
     try:
         total_insert_count = 0
         if page_size > 0:
-            with conn.cursor() as cursor:
-                for last_id, rows in _iter_paginated_rows(
-                    cursor, select_sql, params, page_size, id_col
-                ):
-                    logger.info(
-                        "分页查询: last_id=%d, page_size=%d, fetched=%d",
-                        last_id,
-                        page_size,
-                        len(rows),
-                    )
-                    total_insert_count += process_mysql_rows(
-                        conn, rows, logger, batch_size=batch_size, cfg=cfg
-                    )
+            for last_id, rows in _iter_paginated_rows(
+                holder,
+                select_sql,
+                params,
+                page_size,
+                id_col,
+                cfg,
+                logger,
+            ):
+                logger.info(
+                    "分页查询: last_id=%d, page_size=%d, fetched=%d",
+                    last_id,
+                    page_size,
+                    len(rows),
+                )
+                total_insert_count += process_mysql_rows(
+                    holder, rows, logger, batch_size=batch_size, cfg=cfg
+                )
         else:
             fetch_sql = f"{select_sql.strip()} ORDER BY {id_col}"
-            with conn.cursor() as cursor:
-                cursor.execute(fetch_sql, params)
-                rows = cursor.fetchall()
+
+            def fetch_all() -> list:
+                with holder.conn.cursor() as cursor:
+                    cursor.execute(fetch_sql, params)
+                    return cursor.fetchall()
+
+            rows = _with_mysql_retry(
+                fetch_all,
+                holder=holder,
+                cfg=cfg,
+                logger=logger,
+                op_name="全量查询",
+            )
             total_insert_count = process_mysql_rows(
-                conn, rows, logger, batch_size=batch_size, cfg=cfg
+                holder, rows, logger, batch_size=batch_size, cfg=cfg
             )
         logger.info("数据库预测结果已全部更新完成")
         return total_insert_count
@@ -233,7 +345,7 @@ def run_mysql_batch(
         logger.exception("MySQL 批量预测失败")
         raise
     finally:
-        conn.close()
+        holder.close()
 
 
 def predict_from_mysql(cfg: dict | None = None) -> int:

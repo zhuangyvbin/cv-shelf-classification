@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 
@@ -25,6 +26,7 @@ from utils.predict_mapping import (
     row_to_prediction_tuple,
 )
 from utils.predict_mysql import (
+    beijing_tz,
     predict_from_mysql,
     predict_yesterday_from_mysql,
     run_mysql_batch,
@@ -129,22 +131,49 @@ if __name__ == "__main__":
     # predict_from_mysql()
 
     # 5. 昨日 upload_time 批处理（适合 cron）
+    parser = argparse.ArgumentParser(
+        description="昨日 upload_time 批处理（rack_predict），写入 user_visit_img_predictions",
+    )
+    parser.add_argument(
+        "-d",
+        "--date",
+        metavar="YYYY-MM-DD",
+        help="目标日期，默认为昨天（北京时区）",
+    )
+    args = parser.parse_args()
+
+    target_date: date | None = None
+    if args.date is not None:
+        try:
+            target_date = datetime.strptime(args.date, "%Y-%m-%d").date()
+        except ValueError:
+            print(
+                f"日期格式错误: {args.date!r}，请使用 YYYY-MM-DD 格式，例如 2026-04-01",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+    if target_date is None:
+        tz = beijing_tz(cfg)
+        display_date = datetime.now(tz).date() - timedelta(days=1)
+    else:
+        display_date = target_date
+    date_label = f"目标日期: {display_date.isoformat()}"
+
     try:
         start_time = datetime.now()
         print(
-            f"前一天 rack_predict 批处理脚本开始... "
-            f"(开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')})"
+            f"rack_predict 批处理脚本开始... "
+            f"({date_label}, 开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')})"
         )
-        insert_count = predict_yesterday_from_mysql()
+        insert_count = predict_yesterday_from_mysql(target_date=target_date)
         end_time = datetime.now()
         duration = end_time - start_time
         print(
-            f"前一天 rack_predict 批处理脚本结束... "
-            f"(结束时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}, "
+            f"rack_predict 批处理脚本结束... "
+            f"({date_label}, 结束时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}, "
             f"耗时: {duration.total_seconds():.2f}秒, 插入记录数: {insert_count})"
         )
     except Exception as exc:
-        print(f"前一天 rack_predict 批处理失败: {exc}", file=sys.stderr)
+        print(f"rack_predict 批处理失败 ({date_label}): {exc}", file=sys.stderr)
         sys.exit(1)
-
-    # predict_yesterday_from_mysql(target_date=date(2026, 4, 1))  # 补跑指定日
